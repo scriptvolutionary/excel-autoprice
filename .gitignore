@@ -1,5 +1,6 @@
 .venv/
 __pycache__/
+**/__pycache__/
 *.pyc
 *.pyo
 *.pyd
@@ -8,13 +9,15 @@ __pycache__/
 .ruff_cache/
 .tmp/
 .tmp_cx/
+.tmp_cx_run/
 .tmp_tests/
 .benchmark/
+generated_orders/
+*.egg-info/
 data/
 logs/
 outputs/
 archive/
 dist/
-dist_installer/
 build/
 *.spec

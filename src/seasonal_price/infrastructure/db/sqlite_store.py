@@ -55,6 +55,9 @@ class SQLiteStore:
     def ensure_schema(self) -> None:
         with self._connect() as con:
             con.execute("PRAGMA journal_mode=WAL")
+            con.execute("PRAGMA synchronous=NORMAL")
+            con.execute("PRAGMA temp_store=MEMORY")
+            con.execute("PRAGMA cache_size=-20000")
             con.execute("PRAGMA foreign_keys=OFF")
             table_exists = (
                 con.execute(
@@ -109,8 +112,40 @@ class SQLiteStore:
         container: str,
         size: str,
     ) -> None:
+        self.upsert_skus(
+            [
+                (
+                    sku,
+                    category_code,
+                    category_name,
+                    sort_name,
+                    container,
+                    size,
+                )
+            ]
+        )
+
+    def upsert_skus(
+        self,
+        entries: list[tuple[str, str, str, str, str, str]],
+    ) -> None:
+        if not entries:
+            return
+        created_at = utc_now()
+        rows = [
+            (
+                sku,
+                category_code,
+                category_name,
+                sort_name,
+                container,
+                size,
+                created_at,
+            )
+            for sku, category_code, category_name, sort_name, container, size in entries
+        ]
         with self._connect() as con:
-            con.execute(
+            con.executemany(
                 """
                 INSERT INTO sku_registry(
                     sku, category_code, category_name, sort_name, container, size, created_at, is_active
@@ -122,15 +157,7 @@ class SQLiteStore:
                     category_code=excluded.category_code,
                     is_active=1
                 """,
-                (
-                    sku,
-                    category_code,
-                    category_name,
-                    sort_name,
-                    container,
-                    size,
-                    utc_now(),
-                ),
+                rows,
             )
 
     def find_sku_by_key(self, category_name: str, sort_name: str, container: str, size: str) -> str | None:
@@ -146,38 +173,75 @@ class SQLiteStore:
             ).fetchone()
             return None if row is None else str(row["sku"])
 
+    def find_skus_by_keys(
+        self, keys: list[tuple[str, str, str, str]]
+    ) -> dict[tuple[str, str, str, str], str]:
+        if not keys:
+            return {}
+
+        out: dict[tuple[str, str, str, str], str] = {}
+        chunk_size = 200  # 200 * 4 params = 800 < sqlite default 999
+        with self._connect() as con:
+            for start in range(0, len(keys), chunk_size):
+                chunk = keys[start: start + chunk_size]
+                placeholders = ",".join(["(?, ?, ?, ?)"] * len(chunk))
+                params: list[str] = []
+                for category_name, sort_name, container, size in chunk:
+                    params.extend([category_name, sort_name, container, size])
+                rows = con.execute(
+                    f"""
+                    SELECT sku, category_name, sort_name, container, size
+                    FROM sku_registry
+                    WHERE (category_name, sort_name, container, size) IN ({placeholders})
+                    """,
+                    params,
+                ).fetchall()
+                for row in rows:
+                    key = (
+                        str(row["category_name"]),
+                        str(row["sort_name"]),
+                        str(row["container"]),
+                        str(row["size"]),
+                    )
+                    out[key] = str(row["sku"])
+        return out
+
     def all_skus(self) -> set[str]:
         with self._connect() as con:
             return {str(row["sku"]) for row in con.execute("SELECT sku FROM sku_registry")}
 
     def replace_stock_items(self, season_id: str, stock_items: list[StockItem], source_file: Path) -> None:
+        imported_at = utc_now()
+        rows = [
+            (
+                season_id,
+                item.sku,
+                item.category_name,
+                item.category_code,
+                item.sort_name,
+                item.container,
+                item.size,
+                item.price,
+                item.multiplicity,
+                item.stock_total,
+                str(source_file),
+                imported_at,
+            )
+            for item in stock_items
+        ]
         with self._connect() as con:
             con.execute(
                 "DELETE FROM stock_items WHERE season_id=?", (season_id,))
-            for item in stock_items:
-                con.execute(
-                    """
-                    INSERT INTO stock_items(
-                        season_id, sku, category_name, category_code, sort_name, container, size,
-                        price, multiplicity, stock_total, source_file, imported_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        season_id,
-                        item.sku,
-                        item.category_name,
-                        item.category_code,
-                        item.sort_name,
-                        item.container,
-                        item.size,
-                        item.price,
-                        item.multiplicity,
-                        item.stock_total,
-                        str(source_file),
-                        utc_now(),
-                    ),
+            con.executemany(
+                """
+                INSERT INTO stock_items(
+                    season_id, sku, category_name, category_code, sort_name, container, size,
+                    price, multiplicity, stock_total, source_file, imported_at
                 )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
 
     def list_stock_items(self, season_id: str) -> list[StockItem]:
         with self._connect() as con:
@@ -254,51 +318,77 @@ class SQLiteStore:
         status: str,
         message: str | None,
     ) -> None:
+        self.insert_import_file_logs(
+            [
+                (
+                    run_id,
+                    file_path,
+                    client_name,
+                    mtime,
+                    status,
+                    message,
+                )
+            ]
+        )
+
+    def insert_import_file_logs(
+        self,
+        logs: list[tuple[str, Path, str, datetime, str, str | None]],
+    ) -> None:
+        if not logs:
+            return
+        rows = [
+            (
+                run_id,
+                str(file_path),
+                client_name,
+                mtime.strftime(ISO),
+                status,
+                message,
+            )
+            for run_id, file_path, client_name, mtime, status, message in logs
+        ]
         with self._connect() as con:
-            con.execute(
+            con.executemany(
                 """
                 INSERT INTO import_files(run_id, file_path, client_name, mtime, status, message)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (
-                    run_id,
-                    str(file_path),
-                    client_name,
-                    mtime.strftime(ISO),
-                    status,
-                    message,
-                ),
+                rows,
             )
 
     def replace_order_lines(
         self, run_id: str, season_id: str, profile_id: str, order_lines: list[OrderLine]
     ) -> None:
+        rows = [
+            (
+                run_id,
+                line.season_id,
+                line.profile_id,
+                line.client_name,
+                str(line.source_file),
+                line.order_mtime.strftime(ISO),
+                line.sku,
+                line.requested_qty,
+                line.rounded_qty,
+                int(line.was_rounded),
+                line.unit_price,
+            )
+            for line in order_lines
+        ]
         with self._connect() as con:
             con.execute(
                 "DELETE FROM order_lines WHERE season_id=? AND profile_id=?", (season_id, profile_id))
-            for line in order_lines:
-                con.execute(
-                    """
-                    INSERT INTO order_lines(
-                        run_id, season_id, profile_id, client_name, source_file, order_mtime,
-                        sku, requested_qty, rounded_qty, was_rounded, unit_price
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        run_id,
-                        line.season_id,
-                        line.profile_id,
-                        line.client_name,
-                        str(line.source_file),
-                        line.order_mtime.strftime(ISO),
-                        line.sku,
-                        line.requested_qty,
-                        line.rounded_qty,
-                        int(line.was_rounded),
-                        line.unit_price,
-                    ),
+            con.executemany(
+                """
+                INSERT INTO order_lines(
+                    run_id, season_id, profile_id, client_name, source_file, order_mtime,
+                    sku, requested_qty, rounded_qty, was_rounded, unit_price
                 )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
 
     def list_order_lines(self, season_id: str, profile_id: str) -> list[OrderLine]:
         with self._connect() as con:
@@ -332,34 +422,38 @@ class SQLiteStore:
     def replace_allocation_lines(
         self, season_id: str, profile_id: str, allocation_lines: list[AllocationLine]
     ) -> None:
+        allocated_at = utc_now()
+        rows = [
+            (
+                line.season_id,
+                line.profile_id,
+                line.client_name,
+                str(line.source_file),
+                line.order_mtime.strftime(ISO),
+                line.sku,
+                line.requested_qty,
+                line.confirmed_qty,
+                int(line.was_rounded),
+                line.allocation_mode,
+                allocated_at,
+            )
+            for line in allocation_lines
+        ]
         with self._connect() as con:
             con.execute(
                 "DELETE FROM allocation_lines WHERE season_id=? AND profile_id=?",
                 (season_id, profile_id),
             )
-            for line in allocation_lines:
-                con.execute(
-                    """
-                    INSERT INTO allocation_lines(
-                        season_id, profile_id, client_name, source_file, order_mtime, sku,
-                        requested_qty, confirmed_qty, was_rounded, allocation_mode, allocated_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        line.season_id,
-                        line.profile_id,
-                        line.client_name,
-                        str(line.source_file),
-                        line.order_mtime.strftime(ISO),
-                        line.sku,
-                        line.requested_qty,
-                        line.confirmed_qty,
-                        int(line.was_rounded),
-                        line.allocation_mode,
-                        utc_now(),
-                    ),
+            con.executemany(
+                """
+                INSERT INTO allocation_lines(
+                    season_id, profile_id, client_name, source_file, order_mtime, sku,
+                    requested_qty, confirmed_qty, was_rounded, allocation_mode, allocated_at
                 )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
 
     def list_allocation_lines(self, season_id: str, profile_id: str) -> list[AllocationLine]:
         with self._connect() as con:

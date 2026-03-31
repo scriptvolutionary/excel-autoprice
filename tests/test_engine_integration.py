@@ -102,7 +102,8 @@ class EngineIntegrationTests(unittest.TestCase):
                 output_dir=base_dir / "out",
                 base_dir=base_dir,
             )
-            sku_map = self._read_generated_skus(Path(price_result["output_file"]))
+            sku_map = self._read_generated_skus(
+                Path(price_result["output_file"]))
 
             orders_dir = base_dir / "orders"
             orders_dir.mkdir(parents=True, exist_ok=True)
@@ -149,7 +150,8 @@ class EngineIntegrationTests(unittest.TestCase):
             )
             self.assertTrue(Path(price_result["output_file"]).exists())
 
-            sku_map = self._read_generated_skus(Path(price_result["output_file"]))
+            sku_map = self._read_generated_skus(
+                Path(price_result["output_file"]))
             orders_dir = base_dir / "orders"
             orders_dir.mkdir(parents=True, exist_ok=True)
             self._create_order_file(
@@ -219,7 +221,8 @@ class EngineIntegrationTests(unittest.TestCase):
         ws = wb.active
         ws.title = sheet_name
         # Проверяем устойчивость к перестановке колонок через заголовки.
-        ws.append(["Размер", "Категория", "Сорт", "Остаток", "Контейнер", "Кратность", "Цена"])
+        ws.append(["Размер", "Категория", "Сорт", "Остаток",
+                  "Контейнер", "Кратность", "Цена"])
         ws.append(["2-3 листа", "Гортензия", "Анабель", 100, "40 шт", 24, 42])
         ws.append(["2-3 листа", "Гортензия", "Блю", 50, "40 шт", 24, 45])
         path.parent.mkdir(parents=True, exist_ok=True)

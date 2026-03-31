@@ -1,27 +1,28 @@
 Param(
-    [string]$VenvPython = ".\.venv\Scripts\python.exe"
+    [string]$VenvPython = ".\\.venv\\Scripts\\python.exe",
+    [switch]$Clean,
+    [switch]$SkipPostCleanup
 )
 
 $ErrorActionPreference = "Stop"
+$rootPath = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$targetScript = Join-Path $rootPath "scripts\\build_pyinstaller.ps1"
 
-if (-not (Test-Path $VenvPython)) {
-    throw "Python executable not found in venv: $VenvPython"
+if (-not (Test-Path -LiteralPath $targetScript)) {
+    throw "Build script not found: $targetScript"
 }
 
-& $VenvPython -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('PyInstaller') else 1)"
+$args = @{
+    VenvPython = $VenvPython
+}
+if ($SkipPostCleanup) {
+    $args.SkipPostCleanup = $true
+}
+if ($Clean) {
+    $args.Clean = $true
+}
+
+& $targetScript @args
 if ($LASTEXITCODE -ne 0) {
-    throw "PyInstaller is not installed in venv. Install it with: .\\.venv\\Scripts\\python.exe -m pip install pyinstaller"
+    exit $LASTEXITCODE
 }
-
-# Build GUI-only executable with a stable ASCII name first.
-& $VenvPython -m PyInstaller `
-    --clean `
-    --noconfirm `
-    --name SeasonalPrice `
-    --onedir `
-    --windowed `
-    --paths src `
-    src\seasonal_price\presentation\gui.py
-
-Write-Output "Build completed."
-Write-Output "Run: dist\\SeasonalPrice\\SeasonalPrice.exe"

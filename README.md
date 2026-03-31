@@ -27,7 +27,13 @@ $env:PYTHONPATH="src"
 .\.venv\Scripts\python.exe -m seasonal_price.presentation.gui
 ```
 
-## Сборка GUI-приложения
+## Тесты (с автоочисткой кэшей)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\run_tests.ps1
+```
+
+## Сборка onefile EXE (без установщика)
 
 Подготовка окружения (один раз):
 
@@ -35,36 +41,27 @@ $env:PYTHONPATH="src"
 .\.venv\Scripts\python.exe -m pip install pyinstaller
 ```
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build_exe.ps1
-```
-
-Готовый запуск:
-
-- `dist\SeasonalPrice\SeasonalPrice.exe`
-
-## Сборка полноценного установщика (MSI)
-
-Подготовка окружения (один раз):
+Сборка:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install cx_Freeze
+powershell -ExecutionPolicy Bypass -File .\scripts\build_pyinstaller.ps1
 ```
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build_installer.ps1
-```
+Режимы сборки:
 
-Готовый установщик:
+- Быстрый инкрементальный (по умолчанию): без `--clean`, для ежедневной разработки.
+- Чистый: `powershell -ExecutionPolicy Bypass -File .\scripts\build_pyinstaller.ps1 -Clean` (для релизной проверки).
 
-- `dist_installer\SeasonalPrice-<версия>-win64.msi`
+Файл для передачи:
+
+- `dist\SeasonalPrice.exe`
 
 ## Структура данных
 
-- `data/` — база SQLite и служебные данные.
-- `outputs/` — сводки и артефакты обработки.
-- `logs/` — лог-файлы.
-- `archive/` — архив закрытых сезонов.
+- `data/` - база SQLite и служебные данные.
+- `outputs/` - сводки и артефакты обработки.
+- `logs/` - лог-файлы.
+- `archive/` - архив закрытых сезонов.
 
 ## Кодировка и правила
 

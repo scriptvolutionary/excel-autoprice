@@ -69,9 +69,11 @@ class ExcelProcessor:
 
     def read_stock_sheet(self, stock_file: Path, sheet_name: str = "Склад") -> list[StockInputRow]:
         book = pd.ExcelFile(stock_file)
-        resolved_sheet_name = self._resolve_sheet_name(book.sheet_names, sheet_name)
+        resolved_sheet_name = self._resolve_sheet_name(
+            book.sheet_names, sheet_name)
         if resolved_sheet_name is None:
-            available = ", ".join(f"'{name}'" for name in book.sheet_names) or "—"
+            available = ", ".join(
+                f"'{name}'" for name in book.sheet_names) or "—"
             raise ValidationError(
                 f"В файле '{stock_file.name}' не найден лист '{sheet_name}'. "
                 f"Доступные листы: {available}."
@@ -322,7 +324,8 @@ class ExcelProcessor:
             for offset, client in enumerate(clients):
                 col_idx = req_start_col + offset
                 if changed_map.get((item.sku, client), False):
-                    ws_req.cell(row=req_row_idx, column=col_idx).fill = YELLOW_FILL
+                    ws_req.cell(row=req_row_idx,
+                                column=col_idx).fill = YELLOW_FILL
 
             conf_row = [
                 item.sku,
@@ -559,7 +562,8 @@ class ExcelProcessor:
         return None
 
     def _parse_legacy_stock_sheet(self, book: pd.ExcelFile, sheet_name: str) -> list[StockInputRow]:
-        frame = pd.read_excel(book, sheet_name=sheet_name, header=None, dtype=object)
+        frame = pd.read_excel(book, sheet_name=sheet_name,
+                              header=None, dtype=object)
         matrix = frame.where(pd.notna(frame), "")
         rows: list[StockInputRow] = []
         current_category = ""
@@ -591,7 +595,8 @@ class ExcelProcessor:
             size = cells[4] if len(cells) > 4 else ""
             price_raw = cells[5] if len(cells) > 5 else ""
             stock_raw = cells[6] if len(cells) > 6 else ""
-            pack_size = self._extract_pack_size(container) or current_multiplicity
+            pack_size = self._extract_pack_size(
+                container) or current_multiplicity
             rows.append(
                 StockInputRow(
                     category_name=current_category or "Без категории",

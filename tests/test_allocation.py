@@ -50,7 +50,8 @@ class AllocationServiceTests(unittest.TestCase):
             ),
         ]
         result = allocate_fifo(lines, {"ROS-000001": self.stock})
-        by_client = {line.client_name: line.confirmed_qty for line in result.lines}
+        by_client = {
+            line.client_name: line.confirmed_qty for line in result.lines}
         self.assertEqual(by_client["Клиент 1"], 48)
         self.assertEqual(by_client["Клиент 2"], 48)
 
@@ -85,7 +86,8 @@ class AllocationServiceTests(unittest.TestCase):
         total = sum(line.confirmed_qty for line in result.lines)
         self.assertLessEqual(total, 100)
         # При кратности 24 подтверждение всегда кратно.
-        self.assertTrue(all(line.confirmed_qty % 24 == 0 for line in result.lines))
+        self.assertTrue(all(line.confirmed_qty %
+                        24 == 0 for line in result.lines))
 
 
 if __name__ == "__main__":

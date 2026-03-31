@@ -13,7 +13,8 @@ def create_stock(path: Path, positions: int = 300) -> None:
     wb = Workbook()
     ws = wb.active
     ws.title = "Склад"
-    ws.append(["Категория", "Сорт", "Контейнер", "Размер", "Цена", "Кратность", "Остаток"])
+    ws.append(["Категория", "Сорт", "Контейнер",
+              "Размер", "Цена", "Кратность", "Остаток"])
     for idx in range(1, positions + 1):
         ws.append(
             [
@@ -59,7 +60,8 @@ def main() -> None:
 
     started = time.perf_counter()
     init_season(season_id=season_id, base_dir=base)
-    generate_price(stock_file=stock_file, season_id=season_id, output_dir=out_dir, base_dir=base)
+    generate_price(stock_file=stock_file, season_id=season_id,
+                   output_dir=out_dir, base_dir=base)
     import_orders(
         input_dir=orders_dir,
         season_id=season_id,
@@ -67,9 +69,11 @@ def main() -> None:
         base_dir=base,
         duplicate_strategy="latest",
     )
-    allocate(season_id=season_id, mode="fifo", profile_id=profile_id, base_dir=base)
+    allocate(season_id=season_id, mode="fifo",
+             profile_id=profile_id, base_dir=base)
     elapsed = time.perf_counter() - started
-    print(f"Benchmark completed in {elapsed:.2f}s at {datetime.now().isoformat()}")
+    print(
+        f"Benchmark completed in {elapsed:.2f}s at {datetime.now().isoformat()}")
 
 
 if __name__ == "__main__":

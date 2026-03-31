@@ -109,7 +109,8 @@ class SeasonalPriceEngine:
         parsed_files = []
         parse_issues: list[ImportIssue] = []
         for scan_index, file_path in enumerate(
-            self._iter_with_tqdm(files, desc="Сканирование файлов", unit="file"),
+            self._iter_with_tqdm(
+                files, desc="Сканирование файлов", unit="file"),
             start=1,
         ):
             try:
@@ -152,11 +153,13 @@ class SeasonalPriceEngine:
 
         order_lines: list[OrderLine] = []
         import_issues = list(parse_issues)
+        file_logs: list[tuple[str, Path, str, datetime, str, str | None]] = []
         success_files = 0
         error_files = 0
 
         for import_index, parsed in enumerate(
-            self._iter_with_tqdm(parsed_files, desc="Импорт заказов", unit="file"),
+            self._iter_with_tqdm(
+                parsed_files, desc="Импорт заказов", unit="file"),
             start=1,
         ):
             file_path = parsed.meta.file_path
@@ -164,16 +167,19 @@ class SeasonalPriceEngine:
             mtime = parsed.meta.mtime
 
             if file_path not in selected_paths:
-                self._store.insert_import_file_log(
-                    run_id=run_id,
-                    file_path=file_path,
-                    client_name=client_name,
-                    mtime=mtime,
-                    status="skipped_duplicate",
-                    message="Файл пропущен по стратегии разрешения дублей.",
+                file_logs.append(
+                    (
+                        run_id,
+                        file_path,
+                        client_name,
+                        mtime,
+                        "skipped_duplicate",
+                        "Файл пропущен по стратегии разрешения дублей.",
+                    )
                 )
                 current_step = total_files + import_index
-                import_percent = min(int((current_step / total_steps) * 100), 99)
+                import_percent = min(
+                    int((current_step / total_steps) * 100), 99)
                 self._emit_progress(
                     progress_callback=progress_callback,
                     phase="import",
@@ -228,23 +234,27 @@ class SeasonalPriceEngine:
 
             if file_line_count == 0:
                 error_files += 1
-                self._store.insert_import_file_log(
-                    run_id=run_id,
-                    file_path=file_path,
-                    client_name=client_name,
-                    mtime=mtime,
-                    status="error",
-                    message="Не найдено валидных строк заказа.",
+                file_logs.append(
+                    (
+                        run_id,
+                        file_path,
+                        client_name,
+                        mtime,
+                        "error",
+                        "Не найдено валидных строк заказа.",
+                    )
                 )
             else:
                 success_files += 1
-                self._store.insert_import_file_log(
-                    run_id=run_id,
-                    file_path=file_path,
-                    client_name=client_name,
-                    mtime=mtime,
-                    status="success",
-                    message=f"Импортировано строк: {file_line_count}",
+                file_logs.append(
+                    (
+                        run_id,
+                        file_path,
+                        client_name,
+                        mtime,
+                        "success",
+                        f"Импортировано строк: {file_line_count}",
+                    )
                 )
             current_step = total_files + import_index
             import_percent = min(int((current_step / total_steps) * 100), 99)
@@ -257,6 +267,7 @@ class SeasonalPriceEngine:
                 message=f"Импорт заказов: {import_index}/{max(len(parsed_files), 1)}",
             )
 
+        self._store.insert_import_file_logs(file_logs)
         self._store.replace_order_lines(
             run_id=run_id,
             season_id=season_id,
@@ -373,7 +384,8 @@ class SeasonalPriceEngine:
                 if line.confirmed_qty > 0:
                     clients[line.client_name].append(line)
 
-            profile_target_dir = target_dir / profile_id if len(profile_ids) > 1 else target_dir
+            profile_target_dir = target_dir / \
+                profile_id if len(profile_ids) > 1 else target_dir
             profile_target_dir.mkdir(parents=True, exist_ok=True)
             generated_profile = 0
 
@@ -436,12 +448,14 @@ class SeasonalPriceEngine:
         output_target_dir = target_dir / "outputs" / season_id
         if output_source_dir.exists():
             output_target_dir.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(output_source_dir, output_target_dir, dirs_exist_ok=True)
+            shutil.copytree(output_source_dir,
+                            output_target_dir, dirs_exist_ok=True)
             copied_outputs = True
 
         if self._config.log_dir.exists():
             logs_target_dir = target_dir / "logs"
-            shutil.copytree(self._config.log_dir, logs_target_dir, dirs_exist_ok=True)
+            shutil.copytree(self._config.log_dir,
+                            logs_target_dir, dirs_exist_ok=True)
             copied_logs = True
 
         db_target_dir = target_dir / "data"
@@ -481,24 +495,32 @@ class SeasonalPriceEngine:
     def _materialize_stock_with_sku(self, rows: list[StockInputRow]) -> list[StockItem]:
         existing_skus = self._store.all_skus()
         registry = SkuRegistryService(existing_skus=existing_skus)
-        result: list[StockItem] = []
 
+        keys = [
+            (row.category_name, row.sort_name, row.container, row.size)
+            for row in rows
+        ]
+        existing_by_key = self._store.find_skus_by_keys(keys)
+
+        result: list[StockItem] = []
+        sku_registry_rows: list[tuple[str, str, str, str, str, str]] = []
         for row in rows:
             category_code = normalize_category_code(row.category_name)
-            existing = self._store.find_sku_by_key(
-                category_name=row.category_name,
-                sort_name=row.sort_name,
-                container=row.container,
-                size=row.size,
-            )
-            sku = existing or registry.next_sku(category_code)
-            self._store.upsert_sku(
-                sku=sku,
-                category_code=category_code,
-                category_name=row.category_name,
-                sort_name=row.sort_name,
-                container=row.container,
-                size=row.size,
+            key = (row.category_name, row.sort_name, row.container, row.size)
+            sku = existing_by_key.get(key)
+            if sku is None:
+                sku = registry.next_sku(category_code)
+                existing_by_key[key] = sku
+
+            sku_registry_rows.append(
+                (
+                    sku,
+                    category_code,
+                    row.category_name,
+                    row.sort_name,
+                    row.container,
+                    row.size,
+                )
             )
             result.append(
                 StockItem(
@@ -513,6 +535,8 @@ class SeasonalPriceEngine:
                     stock_total=row.stock_total,
                 )
             )
+
+        self._store.upsert_skus(sku_registry_rows)
         return result
 
     @staticmethod
