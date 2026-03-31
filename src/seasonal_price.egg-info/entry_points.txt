@@ -1,0 +1,2 @@
+[console_scripts]
+seasonal-price = seasonal_price.presentation.gui:run_gui
