@@ -51,6 +51,7 @@ class AllocationLine:
     order_mtime: datetime
     sku: str
     requested_qty: int
+    rounded_qty: int
     confirmed_qty: int
     was_rounded: bool
     allocation_mode: str

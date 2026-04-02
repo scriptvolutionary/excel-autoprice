@@ -432,6 +432,7 @@ class SQLiteStore:
                 line.order_mtime.strftime(ISO),
                 line.sku,
                 line.requested_qty,
+                line.rounded_qty,
                 line.confirmed_qty,
                 int(line.was_rounded),
                 line.allocation_mode,
@@ -448,9 +449,10 @@ class SQLiteStore:
                 """
                 INSERT INTO allocation_lines(
                     season_id, profile_id, client_name, source_file, order_mtime, sku,
-                    requested_qty, confirmed_qty, was_rounded, allocation_mode, allocated_at
+                    requested_qty, rounded_qty, confirmed_qty, was_rounded, allocation_mode,
+                    allocated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 rows,
             )
@@ -460,7 +462,7 @@ class SQLiteStore:
             rows = con.execute(
                 """
                 SELECT season_id, profile_id, client_name, source_file, order_mtime, sku,
-                       requested_qty, confirmed_qty, was_rounded, allocation_mode
+                       requested_qty, rounded_qty, confirmed_qty, was_rounded, allocation_mode
                 FROM allocation_lines
                 WHERE season_id=? AND profile_id=?
                 """,
@@ -477,6 +479,7 @@ class SQLiteStore:
                     order_mtime=parse_datetime(str(row["order_mtime"])),
                     sku=str(row["sku"]),
                     requested_qty=int(row["requested_qty"]),
+                    rounded_qty=int(row["rounded_qty"]),
                     confirmed_qty=int(row["confirmed_qty"]),
                     was_rounded=bool(row["was_rounded"]),
                     allocation_mode=str(row["allocation_mode"]),

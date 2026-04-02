@@ -97,5 +97,16 @@ MIGRATIONS: list[tuple[int, str]] = [
             allocated_at TEXT NOT NULL
         );
         """,
-    )
+    ),
+    (
+        2,
+        """
+        ALTER TABLE allocation_lines
+        ADD COLUMN rounded_qty INTEGER NOT NULL DEFAULT 0;
+
+        UPDATE allocation_lines
+        SET rounded_qty = requested_qty
+        WHERE rounded_qty = 0;
+        """,
+    ),
 ]

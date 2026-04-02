@@ -54,6 +54,9 @@ class AllocationServiceTests(unittest.TestCase):
             line.client_name: line.confirmed_qty for line in result.lines}
         self.assertEqual(by_client["Клиент 1"], 48)
         self.assertEqual(by_client["Клиент 2"], 48)
+        line_by_client = {line.client_name: line for line in result.lines}
+        self.assertEqual(line_by_client["Клиент 1"].requested_qty, 50)
+        self.assertEqual(line_by_client["Клиент 1"].rounded_qty, 48)
 
     def test_proportional_allocation_does_not_exceed_stock(self) -> None:
         lines = [
@@ -88,6 +91,8 @@ class AllocationServiceTests(unittest.TestCase):
         # При кратности 24 подтверждение всегда кратно.
         self.assertTrue(all(line.confirmed_qty %
                         24 == 0 for line in result.lines))
+        self.assertTrue(all(line.requested_qty == 96 for line in result.lines))
+        self.assertTrue(all(line.rounded_qty == 96 for line in result.lines))
 
 
 if __name__ == "__main__":

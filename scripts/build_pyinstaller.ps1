@@ -33,9 +33,25 @@ function Resolve-PythonExe {
 
 $pythonExe = Resolve-PythonExe -Candidate $VenvPython -RootPath $rootPath
 
-& $pythonExe -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('PyInstaller') else 1)"
-if ($LASTEXITCODE -ne 0) {
-    throw "PyInstaller is not installed for: $pythonExe"
+$requiredModules = @(
+    "PyInstaller",
+    "PySide6",
+    "pandas",
+    "openpyxl",
+    "reportlab",
+    "tqdm",
+    "xlrd"
+)
+$missingModules = @()
+foreach ($module in $requiredModules) {
+    & $pythonExe -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('$module') else 1)"
+    if ($LASTEXITCODE -ne 0) {
+        $missingModules += $module
+    }
+}
+if ($missingModules.Count -gt 0) {
+    $missingText = ($missingModules -join ", ")
+    throw "Missing Python modules: $missingText. Install dependencies with: `"$pythonExe`" -m pip install -e .[gui]"
 }
 
 try {

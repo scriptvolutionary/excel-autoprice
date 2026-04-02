@@ -28,6 +28,7 @@ def import_orders(
     base_dir: Path | None = None,
     duplicate_strategy: str = "manual",
     duplicate_map_path: Path | None = None,
+    rounding_mode: str = "down",
 ) -> dict[str, Any]:
     engine = build_engine(base_dir=base_dir)
     return engine.import_orders(
@@ -36,6 +37,7 @@ def import_orders(
         profile_id=profile_id,
         duplicate_strategy=duplicate_strategy,
         duplicate_map_path=duplicate_map_path,
+        rounding_mode=rounding_mode,
     )
 
 

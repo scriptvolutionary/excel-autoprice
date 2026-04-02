@@ -17,7 +17,7 @@ from tqdm import tqdm
 from seasonal_price.config import AppConfig
 from seasonal_price.domain.models import AllocationLine, ImportIssue, OrderLine, StockItem
 from seasonal_price.domain.services.allocation import allocate_fifo, allocate_proportional
-from seasonal_price.domain.services.rounding import round_down_to_multiplicity
+from seasonal_price.domain.services.rounding import round_to_multiplicity
 from seasonal_price.domain.services.sku_registry import SkuRegistryService, normalize_category_code
 from seasonal_price.exceptions import DuplicateResolutionError, ValidationError
 from seasonal_price.infrastructure.db.sqlite_store import SQLiteStore
@@ -74,6 +74,7 @@ class SeasonalPriceEngine:
         profile_id: str,
         duplicate_strategy: str = "manual",
         duplicate_map_path: Path | None = None,
+        rounding_mode: str = "down",
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         stock_items = self._store.list_stock_items(season_id)
@@ -107,7 +108,8 @@ class SeasonalPriceEngine:
         )
 
         parsed_files = []
-        parse_issues: list[ImportIssue] = []
+        parse_issues_by_file: dict[Path, list[ImportIssue]] = {}
+        scan_issues: list[ImportIssue] = []
         for scan_index, file_path in enumerate(
             self._iter_with_tqdm(
                 files, desc="Сканирование файлов", unit="file"),
@@ -116,14 +118,14 @@ class SeasonalPriceEngine:
             try:
                 parsed = self._excel.read_order_file(file_path)
                 parsed_files.append(parsed)
-                parse_issues.extend(parsed.issues)
+                parse_issues_by_file[file_path] = list(parsed.issues)
             except Exception as exc:
                 issue = ImportIssue(
                     file_path=file_path,
                     issue_code="parse_error",
                     message=f"Не удалось прочитать файл: {exc}",
                 )
-                parse_issues.append(issue)
+                scan_issues.append(issue)
             scan_percent = int((scan_index / total_steps) * 100)
             self._emit_progress(
                 progress_callback=progress_callback,
@@ -152,7 +154,11 @@ class SeasonalPriceEngine:
         )
 
         order_lines: list[OrderLine] = []
-        import_issues = list(parse_issues)
+        import_issues = list(scan_issues)
+        for parsed in parsed_files:
+            if parsed.meta.file_path in selected_paths:
+                import_issues.extend(
+                    parse_issues_by_file.get(parsed.meta.file_path, []))
         file_logs: list[tuple[str, Path, str, datetime, str, str | None]] = []
         success_files = 0
         error_files = 0
@@ -215,8 +221,8 @@ class SeasonalPriceEngine:
                     continue
 
                 stock = stock_by_sku[sku]
-                rounded_qty, was_rounded = round_down_to_multiplicity(
-                    row.quantity, stock.multiplicity)
+                rounded_qty, was_rounded = round_to_multiplicity(
+                    row.quantity, stock.multiplicity, mode=rounding_mode)
                 line = OrderLine(
                     season_id=season_id,
                     profile_id=profile_id,
@@ -312,6 +318,7 @@ class SeasonalPriceEngine:
             "success_files": success_files,
             "error_files": error_files,
             "imported_lines": len(order_lines),
+            "rounding_mode": rounding_mode,
             "report_file": str(report_path),
             "summary_file": str(summary_path),
         }
@@ -379,22 +386,20 @@ class SeasonalPriceEngine:
         for profile_id in profile_ids:
             allocation_lines = self._store.list_allocation_lines(
                 season_id=season_id, profile_id=profile_id)
-            clients: dict[str, list[AllocationLine]] = defaultdict(list)
-            for line in allocation_lines:
-                if line.confirmed_qty > 0:
-                    clients[line.client_name].append(line)
+            clients = self._build_confirmation_lines(
+                allocation_lines=allocation_lines,
+                stock_by_sku=stock_by_sku,
+            )
 
             profile_target_dir = target_dir / \
                 profile_id if len(profile_ids) > 1 else target_dir
             profile_target_dir.mkdir(parents=True, exist_ok=True)
             generated_profile = 0
 
-            for client, lines in clients.items():
+            for client, pairs in clients.items():
                 safe_name = self._safe_file_name(client)
                 xlsx_path = profile_target_dir / f"{safe_name}.xlsx"
                 pdf_path = profile_target_dir / f"{safe_name}.pdf"
-                pairs = [(stock_by_sku[line.sku], line)
-                         for line in lines if line.sku in stock_by_sku]
                 self._excel.write_client_confirmation_xlsx(
                     xlsx_path, client, pairs)
                 self._pdf.render_confirmation_pdf(
@@ -490,6 +495,28 @@ class SeasonalPriceEngine:
             "archive_dir": str(target_dir),
             "new_season": new_season_id,
             "manifest_file": str(target_dir / "manifest.json"),
+        }
+
+    def generate_price(self, stock_file: Path, season_id: str, output_dir: Path) -> dict[str, Any]:
+        self._store.init_season(season_id)
+        stock_rows = self._excel.read_stock_sheet(stock_file=stock_file, sheet_name="Склад")
+        stock_items = self._materialize_stock_with_sku(stock_rows)
+        self._store.replace_stock_items(
+            season_id=season_id,
+            stock_items=stock_items,
+            source_file=stock_file,
+        )
+
+        output_path = output_dir / f"{season_id}_Прайс_для_клиентов.xlsx"
+        pdf_path = output_dir / f"{season_id}_Прайс_для_клиентов.pdf"
+        self._excel.write_client_price(output_path, stock_items)
+        self._pdf.render_price_pdf(pdf_path, season_id, stock_items)
+        self._logger.info("Сформирован клиентский прайс: %s", output_path)
+        return {
+            "season_id": season_id,
+            "items": len(stock_items),
+            "output_file": str(output_path),
+            "pdf_file": str(pdf_path),
         }
 
     def _materialize_stock_with_sku(self, rows: list[StockInputRow]) -> list[StockItem]:
@@ -589,6 +616,12 @@ class SeasonalPriceEngine:
                 )
             )
             return None
+        self._logger.warning(
+            "Использовано legacy-сопоставление без SKU: файл=%s, строка=%s, SKU=%s",
+            file_path.name,
+            row.row_index,
+            candidates[0],
+        )
         return candidates[0]
 
     def _resolve_duplicate_files(
@@ -684,6 +717,60 @@ class SeasonalPriceEngine:
     @staticmethod
     def _has_writable_stream(stream: Any) -> bool:
         return stream is not None and hasattr(stream, "write")
+
+    def _build_confirmation_lines(
+        self,
+        allocation_lines: list[AllocationLine],
+        stock_by_sku: dict[str, StockItem],
+    ) -> dict[str, list[tuple[StockItem, AllocationLine]]]:
+        clients: dict[str, dict[str, AllocationLine]] = defaultdict(dict)
+        for line in allocation_lines:
+            if line.sku not in stock_by_sku:
+                continue
+            if line.requested_qty <= 0 and line.rounded_qty <= 0 and line.confirmed_qty <= 0:
+                continue
+
+            by_sku = clients[line.client_name]
+            existing = by_sku.get(line.sku)
+            if existing is None:
+                by_sku[line.sku] = line
+                continue
+
+            if line.order_mtime < existing.order_mtime:
+                source_file = line.source_file
+                order_mtime = line.order_mtime
+            else:
+                source_file = existing.source_file
+                order_mtime = existing.order_mtime
+
+            by_sku[line.sku] = AllocationLine(
+                season_id=existing.season_id,
+                profile_id=existing.profile_id,
+                client_name=existing.client_name,
+                source_file=source_file,
+                order_mtime=order_mtime,
+                sku=existing.sku,
+                requested_qty=existing.requested_qty + line.requested_qty,
+                rounded_qty=existing.rounded_qty + line.rounded_qty,
+                confirmed_qty=existing.confirmed_qty + line.confirmed_qty,
+                was_rounded=existing.was_rounded or line.was_rounded,
+                allocation_mode=existing.allocation_mode,
+            )
+
+        result: dict[str, list[tuple[StockItem, AllocationLine]]] = {}
+        for client_name, by_sku in clients.items():
+            lines = sorted(
+                by_sku.values(),
+                key=lambda line: (
+                    stock_by_sku[line.sku].category_name,
+                    stock_by_sku[line.sku].sort_name,
+                    stock_by_sku[line.sku].container,
+                    stock_by_sku[line.sku].size,
+                    line.sku,
+                ),
+            )
+            result[client_name] = [(stock_by_sku[line.sku], line) for line in lines]
+        return result
 
     @staticmethod
     def _safe_file_name(name: str) -> str:
